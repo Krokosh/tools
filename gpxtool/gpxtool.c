@@ -16,12 +16,18 @@ struct sPosition {
   struct sPosition *pNext;
 };
 
-struct sPosition *pListHead=NULL;
+struct sPosList {
+  struct sPosition sHead;
+  struct sPosList *pNext;
+};
+
+struct sPosList *pListHead=NULL;
 
 int fillNode(struct sPosition *pList, 
 	     double dLatitude, double dLongitude, double dAltitude,
 	     time_t tTimestamp, int nSat, double dHDOP)
 {
+  printf("Filling node at time %lld\n",tTimestamp);
   pList->dLatitude=dLatitude;
   pList->dLongitude=dLongitude;
   pList->dAltitude=dAltitude;
@@ -39,7 +45,74 @@ int addNode(struct sPosition *pList,
     return addNode(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
   
   pList->pNext=malloc(sizeof(struct sPosition));
-  fillNode(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+  return fillNode(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+}
+
+int fillNodeList(struct sPosList *pList,
+		double dLatitude, double dLongitude, double dAltitude,
+		time_t tTimestamp, int nSat, double dHDOP)
+{
+  printf("Filling node list at time %lld\n",tTimestamp);
+  pList->sHead.tTimestamp=tTimestamp;
+  pList->sHead.pNext=malloc(sizeof(struct sPosition));
+  fillNode(pList->sHead.pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+  pList->pNext=NULL;
+}
+
+int addNodeList(struct sPosList *pList,
+		double dLatitude, double dLongitude, double dAltitude,
+		time_t tTimestamp, int nSat, double dHDOP)
+{
+  if(pList->sHead.tTimestamp==tTimestamp)
+    {
+      printf("Matched timestamp %lld\n",tTimestamp);
+      return addNode(pList->sHead.pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+    }
+  if(pList->pNext)
+    {
+      if(pList->pNext->sHead.tTimestamp<=tTimestamp)
+	return addNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+      printf("Adding timestamp %lld between %lld and %lld\n",tTimestamp,pList->sHead.tTimestamp,pList->pNext->sHead.tTimestamp);
+      struct sPosList *pTemp=pList->pNext;
+      pList->pNext=malloc(sizeof(struct sPosList));
+      fillNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+      pList->pNext->pNext=pTemp;
+    }
+  else
+    {
+      pList->pNext=malloc(sizeof(struct sPosList));
+      fillNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+    }
+}
+
+int procNodeList(struct sPosList *pList)
+{
+  int n2DCount=0, n3DCount=0;
+  struct sPosition *pPos=pList->sHead.pNext;
+  pList->sHead.dLatitude=0;
+  pList->sHead.dLongitude=0;
+  pList->sHead.dAltitude=0;
+  printf("Time %lld\n",pList->sHead.tTimestamp);
+  while(pPos)
+    {
+      pList->sHead.dLatitude+=pPos->dLatitude;
+      pList->sHead.dLongitude+=pPos->dLongitude;
+      printf("Point %d Lat %f Lon %f\n",n2DCount,pPos->dLatitude,pPos->dLongitude);
+      n2DCount++;
+      if(pPos->dAltitude)
+	{
+	  pList->sHead.dAltitude+=pPos->dAltitude;
+	  n3DCount++;
+	}
+      pPos=pPos->pNext;   
+    }
+  pList->sHead.dLatitude/=n2DCount;
+  pList->sHead.dLongitude/=n2DCount;
+  if(n3DCount)
+    pList->sHead.dAltitude/=n3DCount;
+  if(pList->pNext)
+    procNodeList(pList->pNext);
+  return 0;
 }
 
 void procPoint(xmlDocPtr doc, xmlNodePtr segchild)
@@ -87,11 +160,22 @@ void procPoint(xmlDocPtr doc, xmlNodePtr segchild)
       pointchild=pointchild->next;      
     } 
   if(pListHead)
-    addNode(pListHead,dlat,dlon,dele,epoch,nsat,dhdop);
+    {
+      if(epoch<pListHead->sHead.tTimestamp)
+	{
+	  printf("Earlier timestamp tthan %lld at %lld\n",pListHead->sHead.tTimestamp,epoch);
+	  struct sPosList *pList=malloc(sizeof(struct sPosList));
+	  fillNodeList(pList,dlat,dlon,dele,epoch,nsat,dhdop);
+	  pList->pNext=pListHead;
+	  pListHead=pList;
+	}
+      else
+	addNodeList(pListHead,dlat,dlon,dele,epoch,nsat,dhdop);
+    }
   else
     {
-      pListHead=malloc(sizeof(struct sPosition));
-      fillNode(pListHead,dlat,dlon,dele,epoch,nsat,dhdop);
+      pListHead=malloc(sizeof(struct sPosList));
+      fillNodeList(pListHead,dlat,dlon,dele,epoch,nsat,dhdop);
     }
 }
 
@@ -156,16 +240,33 @@ int main(int argc, char *argv[])
   xmlInitParser();
   
   // Load file
-  procFile(argv[1]);
+  for(i=1;i<argc;i++)
+    {
+      printf("Parsing %s\n",argv[i]);
+      procFile(argv[i]);
+    }
 
   xmlCleanupParser();
 
+  procNodeList(pListHead);
+
   while(pListHead)
     {
-      struct sPosition *pNext=pListHead->pNext;
-      printf("Latitude %f, Longitude %f, Altitude %f, Time %lld, Sat %d, HDOP %f\n",
-	     pListHead->dLatitude,pListHead->dLongitude,pListHead->dAltitude,
-	     pListHead->tTimestamp,pListHead->nSat,pListHead->dHDOP);
+      struct sPosList *pNext=pListHead->pNext;
+      struct sPosition *pList=pListHead->sHead.pNext;
+      while(pList)
+	{
+	  struct sPosition *pTemp;
+	  printf("Latitude %f, Longitude %f, Altitude %f, Time %lld, Sat %d, HDOP %f\n",
+		 pList->dLatitude,pList->dLongitude,pList->dAltitude,
+		 pList->tTimestamp,pList->nSat,pList->dHDOP);
+	  pTemp=pList;
+	  pList=pList->pNext;
+	  free(pTemp);
+	}
+      printf("Latitude %f, Longitude %f, Altitude %f, Time %lld\n",
+	     pListHead->sHead.dLatitude,pListHead->sHead.dLongitude,pListHead->sHead.dAltitude,
+	     pListHead->sHead.tTimestamp);
       free(pListHead);
       pListHead=pNext;
     }
