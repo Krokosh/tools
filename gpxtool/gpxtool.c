@@ -18,6 +18,7 @@ struct sPosition {
 
 struct sPosList {
   struct sPosition sHead;
+  int nNodes;
   struct sPosList *pNext;
 };
 
@@ -87,23 +88,26 @@ int addNodeList(struct sPosList *pList,
 
 int procNodeList(struct sPosList *pList)
 {
-  int n2DCount=0, n3DCount=0;
+  double n2DCount=0, n3DCount=0;
   struct sPosition *pPos=pList->sHead.pNext;
   pList->sHead.dLatitude=0;
   pList->sHead.dLongitude=0;
   pList->sHead.dAltitude=0;
+  pList->nNodes=0;
   printf("Time %lld\n",pList->sHead.tTimestamp);
   while(pPos)
     {
-      pList->sHead.dLatitude+=pPos->dLatitude;
-      pList->sHead.dLongitude+=pPos->dLongitude;
-      printf("Point %d Lat %f Lon %f\n",n2DCount,pPos->dLatitude,pPos->dLongitude);
-      n2DCount++;
+      pList->sHead.dLatitude+=pPos->dLatitude/pPos->dHDOP;
+      pList->sHead.dLongitude+=pPos->dLongitude/pPos->dHDOP;
+      printf("Point %d Lat %f Lon %f HDOP %f\n",n2DCount,pPos->dLatitude,pPos->dLongitude,pPos->dHDOP);
+      n2DCount+=1/pPos->dHDOP;
       if(pPos->dAltitude)
 	{
-	  pList->sHead.dAltitude+=pPos->dAltitude;
-	  n3DCount++;
+	  pList->sHead.dAltitude+=pPos->dAltitude/pPos->dHDOP;
+	  n3DCount+=1/pPos->dHDOP;
 	}
+      pList->nNodes++;
+  
       pPos=pPos->pNext;   
     }
   pList->sHead.dLatitude/=n2DCount;
@@ -250,6 +254,12 @@ int main(int argc, char *argv[])
 
   procNodeList(pListHead);
 
+  FILE *fp=fopen("out.gpx","w");
+  fprintf(fp,"<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n");
+  fprintf(fp,"<gpx version=\"1.1\" creator=\"Crok's GPX merger\" xmlns=\"http://www.topografix.com/GPX/1/0\">\n");
+  fprintf(fp,"\t<trk>\n");
+  fprintf(fp,"\t\t<trkseg>\n");
+  
   while(pListHead)
     {
       struct sPosList *pNext=pListHead->pNext;
@@ -267,9 +277,15 @@ int main(int argc, char *argv[])
       printf("Latitude %f, Longitude %f, Altitude %f, Time %lld\n",
 	     pListHead->sHead.dLatitude,pListHead->sHead.dLongitude,pListHead->sHead.dAltitude,
 	     pListHead->sHead.tTimestamp);
+      fprintf(fp,"\t\t\t<trkpt lat=\"%f\" lon=\"%f\">\n",pListHead->sHead.dLatitude,pListHead->sHead.dLongitude);
+      fprintf(fp,"\t\t\t</trkpt>\n");
       free(pListHead);
       pListHead=pNext;
     }
+  fprintf(fp,"\t\t</trkseg>\n");
+  fprintf(fp,"\t</trk>\n");
+  fprintf(fp,"</gpx>\n");
+  fclose(fp);
   
   return 0;
 }
