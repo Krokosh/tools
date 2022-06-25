@@ -6,6 +6,8 @@
 #define __USE_XOPEN  // For strptime
 #include <time.h>
 
+#define TRACK_FLAG_NEWSEG 0x01
+
 struct sPosition {
   double dLatitude;
   double dLongitude;
@@ -19,6 +21,7 @@ struct sPosition {
 struct sPosList {
   struct sPosition sHead;
   int nNodes;
+  unsigned char bFlags;
   struct sPosList *pNext;
 };
 
@@ -51,38 +54,40 @@ int addNode(struct sPosition *pList,
 
 int fillNodeList(struct sPosList *pList,
 		double dLatitude, double dLongitude, double dAltitude,
-		time_t tTimestamp, int nSat, double dHDOP)
+		 time_t tTimestamp, int nSat, double dHDOP, char bFlags)
 {
   printf("Filling node list at time %lld\n",tTimestamp);
   pList->sHead.tTimestamp=tTimestamp;
   pList->sHead.pNext=malloc(sizeof(struct sPosition));
   fillNode(pList->sHead.pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+  pList->bFlags=bFlags;
   pList->pNext=NULL;
 }
 
 int addNodeList(struct sPosList *pList,
 		double dLatitude, double dLongitude, double dAltitude,
-		time_t tTimestamp, int nSat, double dHDOP)
+		time_t tTimestamp, int nSat, double dHDOP, char bFlags)
 {
   if(pList->sHead.tTimestamp==tTimestamp)
     {
       printf("Matched timestamp %lld\n",tTimestamp);
+      pList->bFlags|=bFlags;
       return addNode(pList->sHead.pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
     }
   if(pList->pNext)
     {
       if(pList->pNext->sHead.tTimestamp<=tTimestamp)
-	return addNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+	return addNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP, bFlags);
       printf("Adding timestamp %lld between %lld and %lld\n",tTimestamp,pList->sHead.tTimestamp,pList->pNext->sHead.tTimestamp);
       struct sPosList *pTemp=pList->pNext;
       pList->pNext=malloc(sizeof(struct sPosList));
-      fillNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+      fillNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP, bFlags);
       pList->pNext->pNext=pTemp;
     }
   else
     {
       pList->pNext=malloc(sizeof(struct sPosList));
-      fillNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP);
+      fillNodeList(pList->pNext,dLatitude,dLongitude,dAltitude,tTimestamp, nSat, dHDOP, bFlags);
     }
 }
 
@@ -99,7 +104,7 @@ int procNodeList(struct sPosList *pList)
     {
       pList->sHead.dLatitude+=pPos->dLatitude/pPos->dHDOP;
       pList->sHead.dLongitude+=pPos->dLongitude/pPos->dHDOP;
-      printf("Point %d Lat %f Lon %f HDOP %f\n",n2DCount,pPos->dLatitude,pPos->dLongitude,pPos->dHDOP);
+      printf("Point %d Lat %f Lon %f HDOP %f\n",pList->nNodes,pPos->dLatitude,pPos->dLongitude,pPos->dHDOP);
       n2DCount+=1/pPos->dHDOP;
       if(pPos->dAltitude)
 	{
@@ -119,13 +124,13 @@ int procNodeList(struct sPosList *pList)
   return 0;
 }
 
-void procPoint(xmlDocPtr doc, xmlNodePtr segchild)
+void procPoint(xmlDocPtr doc, xmlNodePtr segchild, char bFlags)
 {
   char *end = 0;
   struct tm ttime;
   time_t epoch;
-  double dlat,dlon,dele,dhdop;
-  int nsat;
+  double dlat,dlon,dele,dhdop=5;
+  int nsat=3;
   xmlChar *lat = xmlGetProp(segchild, (xmlChar*)"lat");
   xmlChar *lon = xmlGetProp(segchild, (xmlChar*)"lon");
   printf("Lat %s lon %s\n",(char *)lat, (char *)lon);
@@ -169,17 +174,17 @@ void procPoint(xmlDocPtr doc, xmlNodePtr segchild)
 	{
 	  printf("Earlier timestamp tthan %lld at %lld\n",pListHead->sHead.tTimestamp,epoch);
 	  struct sPosList *pList=malloc(sizeof(struct sPosList));
-	  fillNodeList(pList,dlat,dlon,dele,epoch,nsat,dhdop);
+	  fillNodeList(pList,dlat,dlon,dele,epoch,nsat,dhdop,bFlags);
 	  pList->pNext=pListHead;
 	  pListHead=pList;
 	}
       else
-	addNodeList(pListHead,dlat,dlon,dele,epoch,nsat,dhdop);
+	addNodeList(pListHead,dlat,dlon,dele,epoch,nsat,dhdop,bFlags);
     }
   else
     {
       pListHead=malloc(sizeof(struct sPosList));
-      fillNodeList(pListHead,dlat,dlon,dele,epoch,nsat,dhdop);
+      fillNodeList(pListHead,dlat,dlon,dele,epoch,nsat,dhdop,bFlags);
     }
 }
 
@@ -209,14 +214,19 @@ void procFile(char *szName)
 		  while(trackchild)
 		    {
 		      printf("track child node: %s\n",(char *)trackchild->name);
-		      if(!strcmp((char *)child->name,"trk"))
+		      if(!strcmp((char *)trackchild->name,"trkseg"))
 			{
+			  char bFlags=TRACK_FLAG_NEWSEG;
+			  
 			  xmlNodePtr segchild=trackchild->xmlChildrenNode;
 			  while(segchild)
 			    {
 			      printf("seg child node: %s\n",(char *)segchild->name);
 			      if(!strcmp((char *)segchild->name,"trkpt"))
-				procPoint(doc,segchild);
+				{
+				  procPoint(doc,segchild,bFlags);
+				  bFlags=0;
+				}
 			      segchild=segchild->next;
 			    }
 			}
@@ -258,8 +268,7 @@ int main(int argc, char *argv[])
   fprintf(fp,"<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n");
   fprintf(fp,"<gpx version=\"1.1\" creator=\"Crok's GPX merger\" xmlns=\"http://www.topografix.com/GPX/1/0\">\n");
   fprintf(fp,"\t<trk>\n");
-  fprintf(fp,"\t\t<trkseg>\n");
-  
+  int nFirst=1;
   while(pListHead)
     {
       struct sPosList *pNext=pListHead->pNext;
@@ -277,6 +286,13 @@ int main(int argc, char *argv[])
       printf("Latitude %f, Longitude %f, Altitude %f, Time %lld\n",
 	     pListHead->sHead.dLatitude,pListHead->sHead.dLongitude,pListHead->sHead.dAltitude,
 	     pListHead->sHead.tTimestamp);
+      if(pListHead->bFlags&TRACK_FLAG_NEWSEG)
+	{
+	  if(!nFirst)
+	    fprintf(fp,"\t\t</trkseg>\n");
+	  nFirst=0;
+	  fprintf(fp,"\t\t<trkseg>\n");
+	}
       fprintf(fp,"\t\t\t<trkpt lat=\"%f\" lon=\"%f\">\n",pListHead->sHead.dLatitude,pListHead->sHead.dLongitude);
       fprintf(fp,"\t\t\t</trkpt>\n");
       free(pListHead);
