@@ -140,6 +140,9 @@ void procPoint(xmlDocPtr doc, xmlNodePtr segchild, char bFlags)
   while(pointchild)
     {
       printf("point child node: %s\n",(char *)pointchild->name);
+	  dele = 0;
+	  dhdop = 10;
+	  nsat = 0;
       if(!strcmp((char *)pointchild->name,"ele"))
 	{					
 	  xmlChar *ele = xmlNodeListGetString(doc, pointchild->xmlChildrenNode, 1);
@@ -150,7 +153,18 @@ void procPoint(xmlDocPtr doc, xmlNodePtr segchild, char bFlags)
 	{	
 	  xmlChar *time = xmlNodeListGetString(doc, pointchild->xmlChildrenNode, 1);
 	  printf("Time %s\n",(char *)time);
+#ifdef WIN32
+	  int nYear, nMonth, nDay, nHour, nMinute, nSecond;
+	  sscanf((char*)time, "%i-%i-%iT%i:%i:%iZ", &nYear, &nMonth, &nDay, &nHour, &nMinute, &nSecond);
+	  ttime.tm_hour = nHour;
+	  ttime.tm_min = nMinute;
+	  ttime.tm_sec = nSecond;
+	  ttime.tm_year = nYear - 1900;
+	  ttime.tm_mon = nMonth - 1;
+	  ttime.tm_mday = nDay;
+#else
 	  strptime((char*)time, "%Y-%m-%dT%H:%M:%SZ", &(ttime));
+#endif
 	  epoch = mktime(&ttime);
 	  printf("Time %d\n",epoch);
 	}
