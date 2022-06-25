@@ -104,7 +104,7 @@ int procNodeList(struct sPosList *pList)
     {
       pList->sHead.dLatitude+=pPos->dLatitude/pPos->dHDOP;
       pList->sHead.dLongitude+=pPos->dLongitude/pPos->dHDOP;
-      printf("Point %d Lat %f Lon %f HDOP %f\n",pList->nNodes,pPos->dLatitude,pPos->dLongitude,pPos->dHDOP);
+	  printf("Point %d Lat %f Lon %f Ele %f HDOP %f\n", pList->nNodes, pPos->dLatitude, pPos->dLongitude, pPos->dAltitude, pPos->dHDOP);
       n2DCount+=1/pPos->dHDOP;
       if(pPos->dAltitude)
 	{
@@ -275,7 +275,7 @@ int main(int argc, char *argv[])
     }
 
   xmlCleanupParser();
-
+  pListHead->bFlags |= TRACK_FLAG_NEWSEG;
   procNodeList(pListHead);
 
   FILE *fp=fopen("out.gpx","w");
@@ -285,8 +285,11 @@ int main(int argc, char *argv[])
   int nFirst=1;
   while(pListHead)
     {
+	  struct tm *pTime;
+	  time_t epoch;
       struct sPosList *pNext=pListHead->pNext;
       struct sPosition *pList=pListHead->sHead.pNext;
+	  char szTemp[100];
       while(pList)
 	{
 	  struct sPosition *pTemp;
@@ -307,7 +310,14 @@ int main(int argc, char *argv[])
 	  nFirst=0;
 	  fprintf(fp,"\t\t<trkseg>\n");
 	}
+	  epoch = pListHead->sHead.tTimestamp;
+	  pTime = gmtime(&epoch);
+	  strftime(szTemp, sizeof szTemp,
+		  "%Y-%m-%dT%H:%M:%SZ", pTime);
       fprintf(fp,"\t\t\t<trkpt lat=\"%f\" lon=\"%f\">\n",pListHead->sHead.dLatitude,pListHead->sHead.dLongitude);
+
+	  fprintf(fp, "\t\t\t\t<ele>%f</ele>\n", pListHead->sHead.dAltitude);
+	  fprintf(fp, "\t\t\t\t<time>%s</time>\n", szTemp);
       fprintf(fp,"\t\t\t</trkpt>\n");
       free(pListHead);
       pListHead=pNext;
@@ -316,6 +326,6 @@ int main(int argc, char *argv[])
   fprintf(fp,"\t</trk>\n");
   fprintf(fp,"</gpx>\n");
   fclose(fp);
-  
+  getchar();
   return 0;
 }
