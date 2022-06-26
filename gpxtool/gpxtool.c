@@ -106,7 +106,7 @@ int procNodeList(struct sPosList *pList)
       pList->sHead.dLongitude+=pPos->dLongitude/pPos->dHDOP;
 	  printf("Point %d Lat %f Lon %f Ele %f HDOP %f\n", pList->nNodes, pPos->dLatitude, pPos->dLongitude, pPos->dAltitude, pPos->dHDOP);
       n2DCount+=1/pPos->dHDOP;
-      if(pPos->dAltitude)
+      if(pPos->dAltitude!=0)
 	{
 	  pList->sHead.dAltitude+=pPos->dAltitude/pPos->dHDOP;
 	  n3DCount+=1/pPos->dHDOP;
@@ -129,7 +129,7 @@ void procPoint(xmlDocPtr doc, xmlNodePtr segchild, char bFlags)
   char *end = 0;
   struct tm ttime;
   time_t epoch;
-  double dlat,dlon,dele,dhdop=5;
+  double dlat,dlon,dele=0,dhdop=10;
   int nsat=3;
   xmlChar *lat = xmlGetProp(segchild, (xmlChar*)"lat");
   xmlChar *lon = xmlGetProp(segchild, (xmlChar*)"lon");
@@ -140,9 +140,6 @@ void procPoint(xmlDocPtr doc, xmlNodePtr segchild, char bFlags)
   while(pointchild)
     {
       printf("point child node: %s\n",(char *)pointchild->name);
-	  dele = 0;
-	  dhdop = 10;
-	  nsat = 0;
       if(!strcmp((char *)pointchild->name,"ele"))
 	{					
 	  xmlChar *ele = xmlNodeListGetString(doc, pointchild->xmlChildrenNode, 1);
@@ -257,7 +254,11 @@ void procFile(char *szName)
 int main(int argc, char *argv[])
 {
   int i,j;
+  char szTemp[100];
 
+  struct tm *pTime;
+  time_t epoch;
+  
   if (argc<2) 
     {
       printf("No file name given!\n");
@@ -278,18 +279,17 @@ int main(int argc, char *argv[])
   pListHead->bFlags |= TRACK_FLAG_NEWSEG;
   procNodeList(pListHead);
 
-  FILE *fp=fopen("out.gpx","w");
+  epoch = pListHead->sHead.tTimestamp;
+  pTime = gmtime(&epoch);
+  strftime(szTemp, sizeof szTemp, "%Y%m%dT%H%M%S.gpx", pTime);
+  FILE *fp=fopen(szTemp,"w");
   fprintf(fp,"<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n");
   fprintf(fp,"<gpx version=\"1.1\" creator=\"Crok's GPX merger\" xmlns=\"http://www.topografix.com/GPX/1/0\">\n");
-  fprintf(fp,"\t<trk>\n");
   int nFirst=1;
   while(pListHead)
     {
-	  struct tm *pTime;
-	  time_t epoch;
       struct sPosList *pNext=pListHead->pNext;
       struct sPosition *pList=pListHead->sHead.pNext;
-	  char szTemp[100];
       while(pList)
 	{
 	  struct sPosition *pTemp;
@@ -306,18 +306,23 @@ int main(int argc, char *argv[])
       if(pListHead->bFlags&TRACK_FLAG_NEWSEG)
 	{
 	  if(!nFirst)
-	    fprintf(fp,"\t\t</trkseg>\n");
+	    {
+	      fprintf(fp,"\t\t</trkseg>\n");
+	      fprintf(fp,"\t</trk>\n");
+	    }
 	  nFirst=0;
-	  fprintf(fp,"\t\t<trkseg>\n");
+	  {
+	    fprintf(fp,"\t<trk>\n");
+	    fprintf(fp,"\t\t<trkseg>\n");
+	  }
 	}
-	  epoch = pListHead->sHead.tTimestamp;
-	  pTime = gmtime(&epoch);
-	  strftime(szTemp, sizeof szTemp,
-		  "%Y-%m-%dT%H:%M:%SZ", pTime);
+      epoch = pListHead->sHead.tTimestamp;
+      pTime = gmtime(&epoch);
+      strftime(szTemp, sizeof szTemp, "%Y-%m-%dT%H:%M:%SZ", pTime);
       fprintf(fp,"\t\t\t<trkpt lat=\"%f\" lon=\"%f\">\n",pListHead->sHead.dLatitude,pListHead->sHead.dLongitude);
-
-	  fprintf(fp, "\t\t\t\t<ele>%f</ele>\n", pListHead->sHead.dAltitude);
-	  fprintf(fp, "\t\t\t\t<time>%s</time>\n", szTemp);
+      
+      fprintf(fp, "\t\t\t\t<ele>%f</ele>\n", pListHead->sHead.dAltitude);
+      fprintf(fp, "\t\t\t\t<time>%s</time>\n", szTemp);
       fprintf(fp,"\t\t\t</trkpt>\n");
       free(pListHead);
       pListHead=pNext;
